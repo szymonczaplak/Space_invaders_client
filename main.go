@@ -1,4 +1,4 @@
-package main
+package Space_invaders_client
 
 import (
 	"flag"
@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,18 +17,18 @@ const (
 	INITIAL_PLAYER_Y = 200
 	INITIAL_WEAPON = 0
 	INITIAL_LIFE = 2
-	MOVEMENT_SPEED = 3
+	MOVEMENT_SPEED = 1
 
-
+	ENEMY_SIZE = 10
 	INITIAL_ENEMY_Y = -20
 
 	BULLET_SPEED = 5
 
 	ENEMY_SPEED = 1
 
-	MIN_BULLET_Y = -10
+	MIN_BULLET_Y = -1
 
-	MAX_BULLET_Y = 320
+	MAX_BULLET_Y = 400
 
 	ENEMY_BULLET_SPEED = 1.3
 	)
@@ -59,7 +60,6 @@ func formatRequest(r *http.Request) string {
 
 func recFunc(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()  // parse arguments, you have to call this by yourself
-	fmt.Print(formatRequest(r))
 	for k, v := range r.Form {
 		fmt.Println("key:", k)
 		fmt.Println("val:", strings.Join(v, ""))
@@ -100,25 +100,24 @@ func recFunc(w http.ResponseWriter, r *http.Request) {
 
 func move_player(dir, index string)  {
 	ind, _ := strconv.Atoi(index)
-	fmt.Print("moving..." + string(index) + string(dir) + "\n")
 	switch dir {
 	case "up":
-		if(players[ind].y <=0){
+		if players[ind].y <=0 {
 			return
 		}
 		players[ind].y -= MOVEMENT_SPEED
 	case "down":
-		if(players[ind].y >=290){
+		if players[ind].y >=290 {
 			return
 		}
 		players[ind].y += MOVEMENT_SPEED
 	case "left":
-		if(players[ind].x <=0){
+		if players[ind].x <=0 {
 			return
 		}
 		players[ind].x -= MOVEMENT_SPEED
 	case "right":
-		if(players[ind].x >=290){
+		if players[ind].x >=290 {
 			return
 		}
 		players[ind].x += MOVEMENT_SPEED
@@ -159,8 +158,6 @@ func update_players() string{
 		weapon += strconv.Itoa(p.weapon) + " "
 		index += strconv.Itoa(p.index) + " "
 	}
-	fmt.Print(x)
-	fmt.Print(y)
 	return x + "\n" + y + "\n" + life +"\n" + weapon + "\n" + index + "\n"
 }
 
@@ -176,8 +173,6 @@ func update_enemies() string{
 		life += strconv.Itoa(p.life) + " "
 		weapon += strconv.Itoa(p.weapon) + " "
 	}
-	fmt.Print(x)
-	fmt.Print(y)
 	return x + "\n" + y + "\n" + life +"\n" + weapon + "\n"
 }
 
@@ -185,15 +180,11 @@ func update_bullets() string{
 	x := ""
 	y := ""
 	owner := ""
-	to_remove := []int{}
 
 	for ind, b := range bullets {
 
 		if b.y >= MAX_BULLET_Y || b.y < MIN_BULLET_Y {
-			to_remove = append(to_remove, ind)
-			fmt.Print("\n\n")
-			fmt.Print(b.y)
-			fmt.Print("\n\n")
+			bullets = append(bullets[:ind], bullets[ind+1:]...)
 			continue
 		}
 		x += strconv.Itoa(b.x) + " "
@@ -201,18 +192,7 @@ func update_bullets() string{
 		owner += strconv.Itoa(b.owner) + " "
 	}
 
-	for _, i := range to_remove{
-		bullets = remove(bullets, i)  //tu blad, zle indeksowanie
-	}
-
-
-	fmt.Print(x)
-	fmt.Print(y)
 	return x + "\n" + y + "\n" + owner + "\n"
-}
-
-func remove(slice []*bullet, s int) []*bullet {
-	return append(slice[:s], slice[s+1:]...)
 }
 
 func sayBye (w http.ResponseWriter, name string){
@@ -231,9 +211,17 @@ func create_wave(){
 	wave_array := []int {50, 80, 110, 140, 170, 200, 230}
 
 	for _, x := range wave_array{
-		e := enemy{x, INITIAL_ENEMY_Y, INITIAL_LIFE, INITIAL_WEAPON}
-		enemies = append(enemies,  &e)
+		for i := 0; i< epoch; i++ {
+			if i%2 == 0{
+				e := enemy{x + ENEMY_SIZE +5, INITIAL_ENEMY_Y + i * ENEMY_SIZE, INITIAL_LIFE, INITIAL_WEAPON}
+				enemies = append(enemies, &e)
+			}else {
+				e := enemy{x, INITIAL_ENEMY_Y + i*ENEMY_SIZE, INITIAL_LIFE, INITIAL_WEAPON}
+				enemies = append(enemies, &e)
+			}
+		}
 	}
+	epoch++
 }
 
 func add_bullets(){
@@ -287,10 +275,81 @@ func bullet_move()  {
 	}
 }
 
+
+func remove_bullet(i int){
+	if len(bullets) == 1 {
+		bullets = [] *bullet{}
+		return
+	}
+	bullets[i] = bullets[len(bullets)-1]
+	// We do not need to put s[i] at the end, as it will be discarded anyway
+	bullets = bullets[:len(bullets)-1]
+}
+func remove_enemy(i int){
+	fmt.Print("Removing" + strconv.Itoa(i) + "from len:" + strconv.Itoa(len(enemies)) + "\n")
+	//mu.Lock()
+	if len(enemies) == 1 {
+		enemies = []*enemy{}
+		return
+	}
+	enemies[i] = enemies[len(enemies)-1]
+	// We do not need to put s[i] at the end, as it will be discarded anyway
+	enemies = enemies[:len(enemies)-1]
+	//mu.Unlock()
+}
+
+
+func detect_collision(){
+	to_remove := []int{}
+	for ind, b := range bullets{
+		switch b.owner {
+		case ENEMY:
+			for _, p := range players{
+				if b.x <= p.x+10 && b.x >= p.x {
+					if b.y <= p.y+10 && b.y >=p.y{
+						p.loose_one_life()
+						to_remove =append(to_remove, ind)
+					}
+				}
+			}
+		case PLAYER:
+			for _, e := range enemies{
+				if b.x <= e.x+10 && b.x >= e.x {
+					if b.y <= e.y+10 && b.y >=e.y{
+						e.loose_one_life()
+						to_remove =append(to_remove, ind)
+					}
+				}
+			}
+		}
+	}
+	removed := 0
+	for i := 0; i<len(to_remove); i++{
+		remove_bullet(to_remove[i] - removed)
+		removed++
+	}
+}
+
+
+func check_enemies_life(){
+	to_remove := []int{}
+	for ind, e := range enemies{
+		if e.life <= 0 {
+			to_remove = append(to_remove, ind)
+		}
+	}
+	removed := 0
+	for i := 0; i<len(to_remove); i++{
+		remove_enemy(to_remove[i] - removed)
+		removed++
+	}
+}
+
 func main_loop(){
 	for {
 		if len(players) == 0{
 			fmt.Print("No players in game\n")
+			time.Sleep(60 * time.Millisecond)
 			continue
 		} else{
 			fmt.Print(strconv.Itoa(len(players)) + "players in game\n")
@@ -302,7 +361,9 @@ func main_loop(){
 
 		bullet_move()
 		move_enemies()
+		detect_collision()
 		create_enemy_bullets()
+		check_enemies_life()
 
 		time.Sleep(60 * time.Millisecond)
 	}
@@ -323,6 +384,9 @@ var enemy_last_move_switch_time = time.Now()
 
 var enemy_last_bullet_create = time.Now()
 
+var epoch = 4
+
+var mu = sync.Mutex{}
 
 var gameState = "stop"
 func main() {

@@ -1,4 +1,4 @@
-package main
+package Space_invaders_client
 
 
 const(
@@ -17,7 +17,7 @@ func (*player) update_weapon( p *player, weapon int)  {
 	p.weapon = weapon
 }
 
-func (*player) loose_one_life(p *player){
+func (p *player) loose_one_life(){
 	p.life --
 }
 

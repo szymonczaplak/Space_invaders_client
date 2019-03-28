@@ -1,4 +1,4 @@
-package main
+package Space_invaders_client
 
 
 type bonus struct {
